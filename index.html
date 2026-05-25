@@ -1,0 +1,1120 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  addDoc, 
+  getDocs, 
+  query, 
+  where, 
+  deleteDoc, 
+  orderBy,
+  getDoc,
+  updateDoc
+} from "firebase/firestore";
+import { getAuth, signInAnonymously } from "firebase/auth";
+
+// إعدادات Firebase الرسمية الخاصة بمشروعك
+const firebaseConfig = {
+  apiKey: "AIzaSyC4AnFr-41S5QU1GUirhNWO-pIQmV4lODY",
+  authDomain: "muhammed-forms.firebaseapp.com",
+  projectId: "muhammed-forms",
+  storageBucket: "muhammed-forms.firebasestorage.app",
+  messagingSenderId: "1061327268881",
+  appId: "1:1061327268881:web:a1b61dc28881bcdaaf55b0",
+  measurementId: "G-D6SDYJHJMM"
+};
+
+// تهيئة خدمات Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// الأقسام المعتمدة في المعهد التقني الدور (مع إضافة الاطراف الصناعية)
+const DEPARTMENTS = [
+  "المحاسبة",
+  "الاسعاف الفوري",
+  "الصيدلة",
+  "المختبرات الطبية",
+  "الاجهزة الطبية",
+  "الالكترونيك",
+  "الميكانيك",
+  "الادارة القانونية",
+  "الاطراف الصناعية"
+];
+
+// الألقاب العلمية المعدلة
+const SCIENTIFIC_TITLES = [
+  "مدرس مساعد", 
+  "مدرس", 
+  "استاذ مساعد", 
+  "استاذ"
+];
+
+// احتساب العام الدراسي ديناميكياً بدلاً من التثبيت اليدوي
+const currentSysDate = new Date();
+const currentSysYear = currentSysDate.getFullYear();
+const currentSysMonth = currentSysDate.getMonth() + 1; // 1-12
+
+// العام الدراسي يبدأ دائماً من 1/9 وينتهي في 31/8 من العام التالي
+const startAcademicYear = currentSysMonth >= 9 ? currentSysYear : currentSysYear - 1;
+const endAcademicYear = startAcademicYear + 1;
+
+export default function App() {
+  // الحالات البرمجية
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [activeTab, setActiveTab] = useState('login');
+  
+  const [researches, setResearches] = useState([]);
+  const [teachers, setTeachers] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // جعل نص الإعلان الافتراضي ديناميكياً يطابق السنة الحالية تلقائياً
+  const [announcementText, setAnnouncementText] = useState(`مرحباً بكم في المنظومة الرقمية السحابية الموحدة الخاصة بتسجيل وإدارة بحوث التدريسيين للعام الدراسي الحالي ${startAcademicYear} - ${endAcademicYear}.`);
+  const [editingAnnouncement, setEditingAnnouncement] = useState("");
+
+  // حقول الدخول
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+
+  // فلاتر البحث
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('الكل');
+  
+  // نظام التنبيهات والنوافذ المنبثقة
+  const [toast, setToast] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(null);
+  const [deleteTeacherModal, setDeleteTeacherModal] = useState(null);
+
+  // حالات التعديل للتدريسيين والمدير
+  const [editingResearchId, setEditingResearchId] = useState(null);
+  const [editingTeacherUsername, setEditingTeacherUsername] = useState(null);
+  const [editTeacherName, setEditTeacherName] = useState("");
+
+  // حالات الخانات المشروطة (دار النشر و Cite Score)
+  const [hasPublisher, setHasPublisher] = useState("كلا");
+  const [hasCiteScore, setHasCiteScore] = useState("كلا");
+
+  // حقول إضافة تدريسي جديد
+  const initialNewTeacherState = {
+    fullName: '', 
+    username: '', 
+    password: '', 
+    department: DEPARTMENTS[0], 
+    scientificTitle: SCIENTIFIC_TITLES[0]
+  };
+  const [newTeacher, setNewTeacher] = useState(initialNewTeacherState);
+
+  // الاستمارة الافتراضية للتدريسي
+  const initialFormState = {
+    researchTitle: "", isJoint: "مفرد", authorPosition: "المنفرد",
+    jointAuthorsCount: 0, internalJointAuthors: "", externalJointAuthors: "",
+    publishType: "مجلة", volume: "", issue: "", 
+    publishMonth: String(currentSysMonth >= 9 ? currentSysMonth : 9), 
+    publishYear: String(startAcademicYear),
+    journalType: "دولية", citeScore: "", journalName: "", journalLink: "",
+    researchLink: "", publisherName: "", publisherLink: "", isInConference: "كلا", conferenceName: ""
+  };
+  const [formData, setFormData] = useState(initialFormState);
+
+  // عرض الإشعارات
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // جلب الإعلان من السحابة
+  const fetchAnnouncement = async () => {
+    try {
+      const docRef = doc(db, "settings", "announcement");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setAnnouncementText(docSnap.data().text);
+        setEditingAnnouncement(docSnap.data().text);
+      } else {
+        setEditingAnnouncement(announcementText);
+      }
+    } catch (error) {
+      console.error("Error fetching announcement:", error);
+    }
+  };
+
+  // التحقق من وجود جلسة سابقة وتهيئة الصلاحيات المخفية
+  useEffect(() => {
+    signInAnonymously(auth).then(() => {
+        fetchAnnouncement();
+    }).catch(err => console.error("Auth error:", err));
+
+    const savedSession = localStorage.getItem('quality_assurance_session');
+    if (savedSession) {
+      const parsedSession = JSON.parse(savedSession);
+      setUser(parsedSession.user);
+      setIsAdmin(parsedSession.isAdmin);
+      setActiveTab('dashboard');
+      fetchCloudData(parsedSession.user, parsedSession.isAdmin);
+    }
+  }, []);
+
+  // جلب البيانات من الفايربيس
+  const fetchCloudData = async (currentUser, adminFlag) => {
+    setLoading(true);
+    try {
+      const researchRef = collection(db, "researches");
+      let qResearches = query(researchRef, orderBy("createdAt", "desc"));
+      
+      if (!adminFlag && currentUser) {
+        qResearches = query(researchRef, where("submittedBy", "==", currentUser.username));
+      }
+      
+      const resSnapshot = await getDocs(qResearches);
+      const resList = resSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setResearches(resList);
+
+      if (adminFlag) {
+        const teachersSnapshot = await getDocs(collection(db, "teachers"));
+        const teachList = teachersSnapshot.docs.map(doc => doc.data());
+        setTeachers(teachList);
+      }
+    } catch (error) {
+      console.error("Error fetching:", error);
+      showToast("حدث خطأ أثناء تحميل البيانات السحابية", "error");
+    }
+    setLoading(false);
+  };
+
+  // تسجيل الدخول
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!loginUsername.trim() || !loginPassword.trim()) {
+      return showToast("يرجى ملء حقول الدخول الموحدة", "error");
+    }
+
+    setLoading(true);
+    const cleanUsername = loginUsername.trim().toLowerCase();
+    const secureEmail = `${cleanUsername}@aldour.iq`;
+
+    try {
+      // 1. التحقق من الهوية عبر سيرفرات جوجل المشفرة (لا توجد كلمات مرور مكشوفة في الكود نهائياً)
+      await signInWithEmailAndPassword(auth, secureEmail, loginPassword);
+
+      if (cleanUsername === 'admin') {
+        const adminUser = { fullName: "الأستاذ محمد عبدالرحمن", username: "admin", department: "شعبة ضمان الجودة" };
+        setIsAdmin(true);
+        setUser(adminUser);
+        setActiveTab('dashboard');
+        localStorage.setItem('quality_assurance_session', JSON.stringify({ user: adminUser, isAdmin: true }));
+        showToast("أهلاً بك أستاذ محمد. تم الدخول بوضع المدير العام.");
+        await fetchCloudData(adminUser, true);
+      } else {
+        // 2. جلب بيانات التدريسي من قاعدة البيانات بعد نجاح المصادقة
+        const docRef = doc(db, "teachers", cleanUsername);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const teacherData = docSnap.data();
+          setIsAdmin(false);
+          setUser(teacherData);
+          setActiveTab('dashboard');
+          localStorage.setItem('quality_assurance_session', JSON.stringify({ user: teacherData, isAdmin: false }));
+          showToast(`أهلاً بك الأستاذ ${teacherData.fullName}. تم تسجيل دخولك بنجاح.`);
+          await fetchCloudData(teacherData, false);
+        } else {
+          showToast("بيانات الحساب غير موجودة في السجلات!", "error");
+          await signOut(auth);
+        }
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      // تهيئة حساب المدير لأول مرة إذا لم يكن موجوداً في السحابة
+      if (cleanUsername === 'admin' && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
+        try {
+          await createUserWithEmailAndPassword(auth, secureEmail, loginPassword);
+          showToast("تم تهيئة حساب المدير لأول مرة بنجاح، يرجى تسجيل الدخول مجدداً.");
+        } catch (err) {
+          showToast("الرمز السري يجب أن يكون 6 أرقام/أحرف على الأقل", "error");
+        }
+      } else {
+        showToast("اسم المستخدم أو كلمة المرور غير صحيحة!", "error");
+      }
+    }
+    setLoading(false);
+  };
+
+  // تسجيل الخروج
+  const handleLogout = () => {
+    localStorage.removeItem('quality_assurance_session');
+    setUser(null);
+    setIsAdmin(false);
+    setResearches([]);
+    setTeachers([]);
+    setLoginUsername('');
+    setLoginPassword('');
+    setActiveTab('login');
+    showToast("تم تسجيل الخروج بنجاح.");
+  };
+
+  // إنشاء حساب تدريسي
+  const handleCreateTeacher = async (e) => {
+    e.preventDefault();
+    
+    if (!newTeacher.fullName.trim()) return showToast("يرجى إدخال اسم التدريسي الثلاثي", "error");
+    if (!newTeacher.username.trim()) return showToast("يرجى إدخال معرّف الدخول", "error");
+    if (!newTeacher.password.trim()) return showToast("يرجى إدخال الرمز السري", "error");
+
+    const cleanUsername = newTeacher.username.trim().toLowerCase().replace(/\s/g, '');
+
+    setLoading(true);
+    try {
+      const docRef = doc(db, "teachers", cleanUsername);
+      const teacherPayload = {
+        fullName: newTeacher.fullName.trim(),
+        username: cleanUsername,
+        password: newTeacher.password.trim(),
+        department: newTeacher.department,
+        scientificTitle: newTeacher.scientificTitle,
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(docRef, teacherPayload);
+      showToast(`تم إنشاء حساب (${newTeacher.fullName}) بنجاح.`);
+      setNewTeacher(initialNewTeacherState);
+      await fetchCloudData(user, true);
+    } catch (error) {
+      console.error("Error creating teacher:", error);
+      showToast("حدث خطأ أثناء حفظ الحساب في قاعدة البيانات", "error");
+    }
+    setLoading(false);
+  };
+
+  // تحديث الإعلان من قبل المدير
+  const handleUpdateAnnouncement = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await setDoc(doc(db, "settings", "announcement"), { text: editingAnnouncement.trim() });
+      setAnnouncementText(editingAnnouncement.trim());
+      showToast("تم تحديث ونشر الإعلان الرسمي بنجاح.");
+    } catch (error) {
+      console.error("Announcement error:", error);
+      showToast("فشل في تحديث الإعلان", "error");
+    }
+    setLoading(false);
+  };
+
+  // تعديل السنة ديناميكياً
+  const handleYearChange = (e) => {
+    const newYear = e.target.value;
+    let newMonth = formData.publishMonth;
+    if (newYear === String(startAcademicYear) && parseInt(newMonth) < 9) newMonth = "9";
+    if (newYear === String(endAcademicYear) && parseInt(newMonth) > 8) newMonth = "1";
+    setFormData({ ...formData, publishYear: newYear, publishMonth: newMonth });
+  };
+
+  // التحقق من اللغة العربية فقط
+  const handleArabicOnlyInput = (field, value) => {
+    const arabicPattern = /^[\u0600-\u06FF\s،,.\-\(\)]*$/;
+    if (value === "" || arabicPattern.test(value)) {
+      setFormData(prev => ({ ...prev, [field]: value }));
+    } else {
+      showToast("عذراً، هذا الحقل يقبل الأسماء باللغة العربية فقط!", "error");
+    }
+  };
+
+  // أرقام فقط
+  const handleNumberOnlyInput = (field, value) => {
+    const numericValue = value.replace(/[^0-9]/g, '');
+    setFormData(prev => ({ ...prev, [field]: numericValue }));
+  };
+
+  // أرقام وعشري فقط لـ Cite Score
+  const handleCiteScoreInput = (value) => {
+    const floatValue = value.replace(/[^0-9.]/g, '');
+    setFormData(prev => ({ ...prev, citeScore: floatValue }));
+  };
+
+  // تفعيل وضع تعديل البحث للتدريسي
+  const handleEditResearchClick = (item) => {
+    setFormData(item);
+    setEditingResearchId(item.id);
+    setHasPublisher(item.publisherName && item.publisherName !== "لا يوجد" ? "نعم" : "كلا");
+    setHasCiteScore(item.citeScore && item.citeScore !== "لا يوجد" ? "نعم" : "كلا");
+    setActiveTab('add');
+    showToast("تم استدعاء بيانات البحث، يمكنك الآن تعديلها وحفظ التغييرات.");
+  };
+
+  // تعديل وحفظ اسم الأستاذ (للمدير العام) مع المزامنة
+  const handleEditTeacherSave = async (username) => {
+    if (!editTeacherName.trim()) return showToast("الاسم لا يمكن أن يكون فارغاً", "error");
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "teachers", username), { fullName: editTeacherName.trim() });
+      
+      const researchRef = collection(db, "researches");
+      const q = query(researchRef, where("submittedBy", "==", username));
+      const querySnapshot = await getDocs(q);
+      
+      const updatePromises = querySnapshot.docs.map(researchDoc => 
+        updateDoc(doc(db, "researches", researchDoc.id), { authorName: editTeacherName.trim() })
+      );
+      await Promise.all(updatePromises);
+
+      showToast("تم تحديث اسم التدريسي وتعديله في كافة بحوثه السابقة بنجاح.");
+      setEditingTeacherUsername(null);
+      await fetchCloudData(user, true);
+    } catch (error) {
+      showToast("حدث خطأ أثناء تحديث الاسم والمزامنة", "error");
+    }
+    setLoading(false);
+  };
+
+  // حذف حساب التدريسي نهائياً من قبل المدير العام
+  const confirmDeleteTeacher = async () => {
+    if (!deleteTeacherModal) return;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, "teachers", deleteTeacherModal));
+      showToast("تم حذف وإيقاف الحساب بنجاح من قاعدة البيانات السحابية.");
+      setDeleteTeacherModal(null);
+      await fetchCloudData(user, true);
+    } catch (error) {
+      showToast("حدث خطأ أثناء حذف الحساب", "error");
+    }
+    setLoading(false);
+  };
+
+  // إضافة أو تعديل بحث
+  const handleResearchSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.researchTitle.trim() || !formData.journalName.trim()) {
+      return showToast("يرجى ملء الحقول الإلزامية للبحث", "error");
+    }
+
+    const year = parseInt(formData.publishYear);
+    const month = parseInt(formData.publishMonth);
+    
+    // شروط ديناميكية بالكامل بناءً على السنة الدراسية الجارية
+    if (year === startAcademicYear && month < 9) {
+        return showToast(`تنبيه: لا يقبل النظام البحوث قبل 1 / 9 / ${startAcademicYear}`, "error");
+    }
+    if (year === endAcademicYear && month > 8) {
+        return showToast(`تنبيه: لا يقبل النظام بحوثاً بعد 31 / 8 / ${endAcademicYear}`, "error");
+    }
+
+    setLoading(true);
+    try {
+      const finalForm = { ...formData };
+      if (hasPublisher === "كلا") {
+        finalForm.publisherName = "لا يوجد";
+        finalForm.publisherLink = "";
+      }
+      if (hasCiteScore === "كلا") {
+        finalForm.citeScore = "لا يوجد";
+      }
+      if (formData.publishType === "مجلة") {
+        finalForm.conferenceName = "";
+        finalForm.isInConference = "كلا";
+      } else if (formData.publishType === "مؤتمر") {
+        finalForm.isInConference = "نعم";
+      }
+
+      const researchPayload = {
+        ...finalForm,
+        authorName: user.fullName,
+        scientificTitle: user.scientificTitle || "تدريسي",
+        department: user.department,
+        submittedBy: user.username,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (editingResearchId) {
+        // تحديث البحث الحالي بدلاً من تكراره
+        await updateDoc(doc(db, "researches", editingResearchId), researchPayload);
+        showToast("تم حفظ التعديلات وتحديث البحث بنجاح.");
+      } else {
+        // إضافة مستند جديد
+        researchPayload.createdAt = new Date().toISOString();
+        await addDoc(collection(db, "researches"), researchPayload);
+        showToast("تم حفظ بحثك بنجاح في قاعدة البيانات.");
+      }
+
+      setFormData(initialFormState);
+      setEditingResearchId(null);
+      setHasPublisher("كلا");
+      setHasCiteScore("كلا");
+      await fetchCloudData(user, isAdmin);
+      setActiveTab('dashboard');
+    } catch (error) {
+      showToast("فشل في إرسال البحث إلى الخادم", "error");
+    }
+    setLoading(false);
+  };
+
+  // تأكيد وحذف البحث
+  const confirmDelete = async () => {
+    if (!deleteModalOpen) return;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, "researches", deleteModalOpen));
+      showToast("تم حذف قيد البحث من السحابة بنجاح.");
+      setDeleteModalOpen(null);
+      await fetchCloudData(user, isAdmin);
+    } catch (error) {
+      showToast("فشل عملية الحذف", "error");
+    }
+    setLoading(false);
+  };
+
+  // فلترة البحوث
+  const filteredResearches = researches.filter(item => {
+    const searchStr = searchTerm.toLowerCase();
+    const matchesSearch = 
+      (item.authorName || '').toLowerCase().includes(searchStr) ||
+      (item.researchTitle || '').toLowerCase().includes(searchStr) ||
+      (item.journalName || '').toLowerCase().includes(searchStr);
+    
+    const matchesDept = filterDepartment === 'الكل' || item.department === filterDepartment;
+    return matchesSearch && matchesDept;
+  });
+
+  // تصدير الإكسل الآمن
+  const exportToCSV = () => {
+    if (filteredResearches.length === 0) return showToast("لا توجد بيانات لتصديرها", "error");
+
+    const headers = [
+      "ت", "اسم التدريسي الكامل", "لقب التدريسي العلمي", "القسم", "عنوان البحث كاملاً",
+      "البحث مفرد ام مشترك", "موقع الباحث بالبحث", "عدد الباحثين المشتركين",
+      "المشترك من تشكيل الجامعة", "المشترك من خارج الجامعة", "جهة النشر", "المجلد", "العدد",
+      "تاريخ النشر (شهر)", "تاريخ النشر (سنة)", "نوع وتصنيف المجلة", "Cite Score",
+      "اسم المجلة/المؤتمر", "رابط المجلة", "رابط البحث المنشور في المجلة", "دار النشر", "رابط دار النشر",
+      "في مؤتمر (نعم)", "في مؤتمر (كلا)", "اسم المؤتمر إن وجد"
+    ];
+
+    const escapeCSV = (str) => {
+      if (!str) return '""';
+      return `"${String(str).replace(/"/g, '""')}"`;
+    };
+
+    const rows = filteredResearches.map((item, index) => [
+      index + 1, escapeCSV(item.authorName), escapeCSV(item.scientificTitle), escapeCSV(item.department),
+      escapeCSV(item.researchTitle), escapeCSV(item.isJoint), escapeCSV(item.authorPosition),
+      item.jointAuthorsCount || 0, escapeCSV(item.internalJointAuthors), escapeCSV(item.externalJointAuthors),
+      escapeCSV(item.publishType), escapeCSV(item.volume), escapeCSV(item.issue), escapeCSV(item.publishMonth),
+      escapeCSV(item.publishYear), escapeCSV(item.journalType), escapeCSV(item.citeScore), escapeCSV(item.journalName),
+      escapeCSV(item.journalLink), escapeCSV(item.researchLink), escapeCSV(item.publisherName), escapeCSV(item.publisherLink),
+      escapeCSV(item.isInConference === 'نعم' ? 'نعم' : ''), escapeCSV(item.isInConference === 'كلا' ? 'كلا' : ''),
+      escapeCSV(item.conferenceName)
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `بحوث_ضمان_الجودة_المعهد_التقني_الدور_${new Date().toISOString().slice(0,10)}.csv`;
+    link.click();
+    showToast("تم تصدير ملف الـ Excel (CSV) بنجاح!");
+  };
+
+  // قائمة الأشهر المتاحة ديناميكياً بناءً على السنة المختارة
+  const availableMonths = formData.publishYear === String(startAcademicYear) 
+    ? [9, 10, 11, 12] 
+    : [1, 2, 3, 4, 5, 6, 7, 8];
+
+  return (
+    <div dir="rtl" className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-12 relative">
+      
+      {toast && (
+        <div className={`fixed top-4 left-4 z-50 flex items-center p-4 rounded-xl shadow-2xl border-r-4 max-w-md transition-all ${
+          toast.type === 'success' ? 'bg-emerald-50 border-emerald-600 text-emerald-900' : 'bg-rose-50 border-rose-600 text-rose-900'
+        }`}>
+          <div className="text-sm font-bold">{toast.message}</div>
+        </div>
+      )}
+
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-100">
+            <h3 className="text-lg font-black text-slate-900 mb-2">تأكيد الحذف</h3>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف هذا البحث نهائياً من قاعدة البيانات السحابية؟
+            </p>
+            <div className="flex gap-3">
+              <button onClick={confirmDelete} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl transition-all">نعم، احذف البحث</button>
+              <button onClick={() => setDeleteModalOpen(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition-all">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTeacherModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-t-4 border-rose-600">
+            <h3 className="text-lg font-black text-rose-600 mb-2">تعطيل وإزالة حساب</h3>
+            <p className="text-sm text-slate-600 mb-6">هل أنت متأكد من إزالة هذا الحساب؟ سيمنع التدريسي من الدخول للمنظومة فوراً.</p>
+            <div className="flex gap-3">
+              <button onClick={confirmDeleteTeacher} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl transition-all shadow-md">نعم، إزالة الحساب</button>
+              <button onClick={() => setDeleteTeacherModal(null)} className="flex-1 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl transition-all">تراجع</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* الهيدر الرسمي */}
+      <header className="bg-gradient-to-r from-slate-900 via-emerald-850 to-teal-950 text-white relative border-b-4 border-amber-500 shadow-lg">
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-white/10 pb-4 mb-4">
+            <div className="text-center md:text-right">
+              <span className="text-amber-400 font-bold tracking-wide text-xs sm:text-sm block mb-1">
+                الجامعة التقنية الشمالية - المعهد التقني الدور
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-black">منظومة البحوث الخاصة بالتدريسيين</h1>
+              <span className="text-emerald-300 text-xs sm:text-sm font-semibold block mt-1">
+                شعبة ضمان الجودة وتقييم الأداء | إعداد: الأستاذ محمد عبدالرحمن
+              </span>
+            </div>
+            {user && (
+              <div className="bg-white/10 px-4 py-2.5 rounded-xl backdrop-blur-sm text-center md:text-left text-xs border border-white/10">
+                <span className="block text-amber-300 font-bold text-sm mb-0.5">{user.fullName}</span>
+                <span className="text-slate-300">{isAdmin ? 'صلاحيات: المدير العام' : `القسم: ${user.department}`}</span>
+              </div>
+            )}
+          </div>
+
+          {/* الإعلان والتوجيه الرسمي التفاعلي المترتب تلقائياً */}
+          <div className="bg-gradient-to-l from-amber-500/10 to-amber-600/20 backdrop-blur-sm rounded-xl p-4 border border-amber-500/30 text-amber-100 text-xs sm:text-sm leading-relaxed shadow-inner">
+            <h3 className="text-amber-400 font-black mb-1.5 text-sm flex items-center gap-1.5">
+                <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                📢 إعلان وتوجيه رسمي:
+            </h3>
+            <p className="font-semibold text-slate-100 whitespace-pre-wrap">{announcementText}</p>
+          </div>
+        </div>
+      </header>
+
+      {/* Navigation */}
+      {user && (
+        <nav className="max-w-7xl mx-auto px-4 -translate-y-4 sm:px-6 lg:px-8 relative z-20">
+          <div className="bg-white rounded-xl shadow-md p-2 flex flex-wrap gap-2 border border-slate-200">
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              📊 لوحة البحوث ({researches.length})
+            </button>
+
+            {!isAdmin && (
+              <button 
+                onClick={() => {
+                  setFormData(initialFormState);
+                  setEditingResearchId(null);
+                  setHasPublisher("كلا");
+                  setHasCiteScore("كلا");
+                  setActiveTab('add');
+                }}
+                className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  activeTab === 'add' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                ➕ {editingResearchId ? "تعديل البحث الحالي" : "إضافة بحث"}
+              </button>
+            )}
+
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('accounts')}
+                className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  activeTab === 'accounts' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-indigo-50'
+                }`}
+              >
+                👥 حسابات الأساتذة و الإعدادات
+              </button>
+            )}
+
+            {/* زر تسجيل الخروج مع الأيقونة */}
+            <button 
+              onClick={handleLogout}
+              className="mr-auto bg-rose-50 text-rose-600 hover:bg-rose-100 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+              </svg>
+              تسجيل الخروج
+            </button>
+          </div>
+        </nav>
+      )}
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+        
+        {loading && (
+          <div className="text-center p-4 mb-4 bg-emerald-50 rounded-xl border border-emerald-200 text-sm text-emerald-700 font-bold animate-pulse">
+            ⏳ جاري الاتصال بقاعدة البيانات السحابية...
+          </div>
+        )}
+
+        {/* 1. Login Form */}
+        {activeTab === 'login' && !user && (
+          <div className="max-w-md mx-auto mt-12 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 text-white text-center py-6 px-4 border-b border-slate-800">
+              <h3 className="text-lg font-black">بوابة الدخول الموحدة</h3>
+              <p className="text-slate-400 text-xs mt-1">شعبة ضمان الجودة - المعهد التقني الدور</p>
+            </div>
+            <form onSubmit={handleLogin} className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-bold text-slate-600 mb-1.5">اسم المستخدم (المعرف الشخصي) *</label>
+                <input 
+                  type="text" 
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-left"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-600 mb-1.5">كلمة المرور *</label>
+                <input 
+                  type="password" 
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-left"
+                />
+              </div>
+              <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-md font-black py-3.5 rounded-xl shadow-lg transition-all">
+                دخول للنظام
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* 2. Dashboard */}
+        {activeTab === 'dashboard' && user && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-bold text-slate-500 mb-1.5">بحث سريع</label>
+                <input 
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="ابحث بالاسم، العنوان، المجلة..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-500 mb-1.5">تصفية بالقسم</label>
+                <select
+                  value={filterDepartment}
+                  onChange={(e) => setFilterDepartment(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  <option value="الكل">الكل</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <button 
+                onClick={exportToCSV}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 py-3 rounded-xl text-sm font-black shadow transition-all"
+              >
+                📥 تصدير الإكسل (CSV)
+              </button>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-sm text-slate-700">
+                {isAdmin ? "سجل البحوث العام المرفوع (مباشر من السحابة)" : "سجل بحوثك الشخصية"}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-right border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100/50 border-b border-slate-200 font-bold text-slate-600 text-sm">
+                      <th className="p-3 w-10 text-center">ت</th>
+                      <th className="p-3">اسم الباحث</th>
+                      <th className="p-3">عنوان البحث</th>
+                      <th className="p-3">طبيعة البحث</th>
+                      <th className="p-3">المجلة والتاريخ</th>
+                      <th className="p-3 text-center">الروابط</th>
+                      <th className="p-3 text-center text-rose-600">إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {filteredResearches.length === 0 ? (
+                      <tr><td colSpan={7} className="p-8 text-center text-slate-500">لا توجد بيانات تطابق بحثك.</td></tr>
+                    ) : (
+                      filteredResearches.map((item, index) => (
+                        <tr key={item.id} className="hover:bg-slate-50/50">
+                          <td className="p-3 text-center font-bold text-slate-400">{index + 1}</td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900">{item.authorName}</div>
+                            <div className="text-xs text-amber-600 font-bold">{item.scientificTitle} | {item.department}</div>
+                          </td>
+                          <td className="p-3 max-w-xs font-mono text-xs leading-relaxed text-slate-700 select-all">
+                            {item.researchTitle}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${item.isJoint === 'مشترك' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                              {item.isJoint} ({item.authorPosition})
+                            </span>
+                          </td>
+                          <td className="p-3 text-xs">
+                            <div className="font-bold text-slate-800">{item.journalName}</div>
+                            <div className="text-slate-500 mt-0.5">{item.publishMonth} / {item.publishYear} | {item.journalType}</div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex justify-center gap-1.5">
+                              {item.researchLink && <a href={item.researchLink} target="_blank" rel="noreferrer" className="text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-2 py-1 rounded text-xs font-bold">بحث</a>}
+                              {item.journalLink && <a href={item.journalLink} target="_blank" rel="noreferrer" className="text-blue-700 bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-xs font-bold">مجلة</a>}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex justify-center gap-2">
+                              {!isAdmin && (
+                                <button 
+                                  type="button" 
+                                  onClick={() => handleEditResearchClick(item)} 
+                                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-100"
+                                >
+                                  تعديل
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button 
+                                  onClick={() => setDeleteModalOpen(item.id)}
+                                  className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                >
+                                  حذف
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Add Research */}
+        {activeTab === 'add' && !isAdmin && user && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
+            <div className={`p-5 font-bold text-sm text-white ${editingResearchId ? 'bg-indigo-800' : 'bg-emerald-800'}`}>
+              {editingResearchId ? 'وضع التعديل النشط: تحديث قيد البحث المفتوح حالياً' : 'استمارة قيد بحث علمي جديد'}
+            </div>
+            <form onSubmit={handleResearchSubmit} className="p-6 sm:p-8 space-y-6">
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div>
+                  <span className="block text-xs font-bold text-slate-500 mb-1">اسم الباحث</span>
+                  <div className="font-black text-slate-900 text-sm">{user.fullName}</div>
+                </div>
+                <div>
+                  <span className="block text-xs font-bold text-slate-500 mb-1">القسم واللقب</span>
+                  <div className="font-black text-amber-600 text-sm">{user.scientificTitle} | {user.department}</div>
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-bold text-slate-600 mb-1.5">عنوان البحث كما هو مذكور باللغة الانكليزية / العربية *</label>
+                  <textarea 
+                    required rows="2" value={formData.researchTitle}
+                    onChange={(e) => setFormData({...formData, researchTitle: e.target.value})}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">نوع المشاركة</label>
+                    <select 
+                      value={formData.isJoint}
+                      onChange={(e) => setFormData({...formData, isJoint: e.target.value, ...(e.target.value==='مفرد' ? {authorPosition:'المنفرد', jointAuthorsCount:0}: {authorPosition:'الأول'})})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm"
+                    >
+                      <option value="مفرد">منفرد</option>
+                      <option value="مشترك">مشترك</option>
+                    </select>
+                  </div>
+                  {formData.isJoint === 'مشترك' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-bold text-slate-600 mb-1.5">موقعك في البحث</label>
+                        <select value={formData.authorPosition} onChange={(e) => setFormData({...formData, authorPosition: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm">
+                          <option value="الأول">الباحث الأول</option>
+                          <option value="الثاني">الباحث الثاني</option>
+                          <option value="الثالث">الباحث الثالث</option>
+                          <option value="الرابع فما فوق">الباحث الرابع فما فوق</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-bold text-slate-600 mb-1.5">عدد المشتركين (عداك)</label>
+                        <input type="number" min="1" value={formData.jointAuthorsCount} onChange={(e) => setFormData({...formData, jointAuthorsCount: parseInt(e.target.value)||0})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm"/>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {formData.isJoint === 'مشترك' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-600 mb-1.5">أسماء المشتركين (داخل الجامعة) [بالعربية فقط]</label>
+                      <input type="text" value={formData.internalJointAuthors} onChange={(e) => handleArabicOnlyInput('internalJointAuthors', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-sm"/>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-slate-600 mb-1.5">أسماء المشتركين (خارج الجامعة) [بالعربية فقط]</label>
+                      <input type="text" value={formData.externalJointAuthors} onChange={(e) => handleArabicOnlyInput('externalJointAuthors', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-sm"/>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">جهة النشر</label>
+                    <select value={formData.publishType} onChange={(e) => setFormData({...formData, publishType: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm">
+                      <option value="مجلة">مجلة علمية</option>
+                      <option value="مؤتمر">مؤتمر علمي</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">سنة النشر *</label>
+                    <select value={formData.publishYear} onChange={handleYearChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-bold text-emerald-700">
+                      <option value={String(startAcademicYear)}>{startAcademicYear}</option>
+                      <option value={String(endAcademicYear)}>{endAcademicYear}</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">شهر النشر *</label>
+                    <select value={formData.publishMonth} onChange={(e) => setFormData({...formData, publishMonth: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-bold text-emerald-700">
+                      {availableMonths.map(m => <option key={m} value={String(m)}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* رقم المجلد والعدد - أرقام فقط */}
+                {(formData.publishType === "مجلة" || formData.publishType === "مؤتمر") && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1.5">رقم المجلد [أرقام فقط] *</label>
+                            <input type="text" required value={formData.volume} onChange={(e) => handleNumberOnlyInput('volume', e.target.value)} placeholder="مثال: 12" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1.5">رقم العدد [أرقام فقط] *</label>
+                            <input type="text" required value={formData.issue} onChange={(e) => handleNumberOnlyInput('issue', e.target.value)} placeholder="مثال: 4" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">اسم المجلة/المؤتمر بالكامل *</label>
+                    <input type="text" required value={formData.journalName} onChange={(e) => setFormData({...formData, journalName: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm"/>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">تصنيف المجلة (سكوباس، الخ) *</label>
+                    <input type="text" required value={formData.journalType} onChange={(e) => setFormData({...formData, journalType: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm"/>
+                  </div>
+                </div>
+
+                {/* اسم المؤتمر التفصيلي */}
+                {formData.publishType === "مؤتمر" && (
+                    <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200">
+                        <label className="block text-sm font-bold text-slate-700 mb-2">اسم المؤتمر العلمي بالتفصيل *</label>
+                        <input type="text" required value={formData.conferenceName} onChange={(e) => setFormData({...formData, conferenceName: e.target.value})} placeholder="اكتب اسم المؤتمر هنا..." className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                    </div>
+                )}
+
+                {/* Cite Score */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">هل يوجد Cite Score؟</label>
+                        <select value={hasCiteScore} onChange={(e) => { setHasCiteScore(e.target.value); if(e.target.value === 'كلا') setFormData({...formData, citeScore: 'لا يوجد'}); }} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-3 text-sm">
+                            <option value="كلا">لا يوجد</option>
+                            <option value="نعم">نعم، يوجد</option>
+                        </select>
+                    </div>
+                    {hasCiteScore === "نعم" && (
+                        <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-2">قيمة Cite Score [أرقام فقط] *</label>
+                            <input type="text" required value={formData.citeScore === "لا يوجد" ? "" : formData.citeScore} onChange={(e) => handleCiteScoreInput(e.target.value)} placeholder="مثال: 4.2" className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                        </div>
+                    )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">رابط البحث المنشور في المجلة</label>
+                    <input type="url" value={formData.researchLink} onChange={(e) => setFormData({...formData, researchLink: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-left"/>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1.5">رابط المجلة الرسمي</label>
+                    <input type="url" value={formData.journalLink} onChange={(e) => setFormData({...formData, journalLink: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-left"/>
+                  </div>
+                </div>
+
+                {/* دار النشر الشرطية */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">هل يوجد دار نشر؟</label>
+                        <select value={hasPublisher} onChange={(e) => { setHasPublisher(e.target.value); if(e.target.value==='كلا') setFormData({...formData, publisherName: 'لا يوجد', publisherLink: ''}); }} className="w-full bg-white border border-slate-300 rounded-xl px-3 py-3 text-sm">
+                            <option value="كلا">لا يوجد</option>
+                            <option value="نعم">نعم، يوجد</option>
+                        </select>
+                    </div>
+                    {hasPublisher === "نعم" && (
+                        <>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">اسم دار النشر *</label>
+                                <input type="text" required value={formData.publisherName === "لا يوجد" ? "" : formData.publisherName} onChange={(e) => setFormData({...formData, publisherName: e.target.value})} placeholder="اسم دار النشر" className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">رابط دار النشر</label>
+                                <input type="url" value={formData.publisherLink} onChange={(e) => setFormData({...formData, publisherLink: e.target.value})} placeholder="https://..." className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-sm font-mono text-left focus:ring-2 focus:ring-emerald-500 outline-none"/>
+                            </div>
+                        </>
+                    )}
+                </div>
+
+              </div>
+
+              <button type="submit" className={`w-full text-white font-black py-4 rounded-xl shadow-lg text-md transition-all ${editingResearchId ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                {editingResearchId ? "تحديث البحث وحفظ التغييرات" : "حفظ وإرسال لشعبة ضمان الجودة"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* 4. Accounts Management */}
+        {activeTab === 'accounts' && isAdmin && (
+          <div className="space-y-6">
+            {/* لوحة تحكم الإعلان للمدير */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-amber-500 text-slate-900 p-5 font-black text-sm flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"></path>
+                    </svg>
+                    تعديل الإعلان والتوجيه الرسمي للمنظومة
+                </div>
+                <form onSubmit={handleUpdateAnnouncement} className="p-5 space-y-4">
+                    <div>
+                        <label className="block font-bold text-slate-700 mb-2">نص الإعلان والتوجيه الحالي (سيظهر لجميع الباحثين في أعلى الصفحة فوراً):</label>
+                        <textarea rows="3" required value={editingAnnouncement} onChange={(e) => setEditingAnnouncement(e.target.value)} placeholder="اكتب التوجيه الرسمي الجديد للعام الدراسي..." className="w-full bg-slate-50 border border-slate-300 rounded-xl p-4 text-sm focus:ring-2 focus:ring-amber-500 outline-none transition-all" />
+                    </div>
+                    <button type="submit" className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-6 py-2.5 rounded-xl text-xs transition-all shadow-md">
+                        تحديث ونشر الإعلان فوراً
+                    </button>
+                </form>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+                <div className="bg-indigo-900 text-white p-5 font-bold text-sm">
+                  توليد حساب تدريسي جديد
+                </div>
+                <form onSubmit={handleCreateTeacher} className="p-5 space-y-4 text-sm">
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1.5">الاسم الثلاثي *</label>
+                    <input type="text" required value={newTeacher.fullName} onChange={(e) => setNewTeacher({...newTeacher, fullName: e.target.value})} placeholder="الاسم الكامل للتدريسي" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1.5">القسم *</label>
+                      <select value={newTeacher.department} onChange={(e) => setNewTeacher({...newTeacher, department: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1.5">اللقب *</label>
+                      <select value={newTeacher.scientificTitle} onChange={(e) => setNewTeacher({...newTeacher, scientificTitle: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                        {SCIENTIFIC_TITLES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="block font-bold text-slate-700 mb-1.5">المعرف (Username) *</label>
+                    <input type="text" required value={newTeacher.username} onChange={(e) => setNewTeacher({...newTeacher, username: e.target.value})} placeholder="بدون مسافات (مثل: ahmed_ali)" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-left font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1.5">الرقم السري *</label>
+                    <input type="text" required value={newTeacher.password} onChange={(e) => setNewTeacher({...newTeacher, password: e.target.value})} placeholder="الرمز المخصص للدخول" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-left font-mono" />
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all">
+                    حفظ وتفعيل الحساب
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden md:col-span-2">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-sm text-slate-700">
+                  الحسابات المصرح لها ({teachers.length})
+                </div>
+                <div className="overflow-x-auto text-sm">
+                  <table className="w-full text-right border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100/40 border-b border-slate-200 font-bold text-slate-600">
+                        <th className="p-4">الاسم واللقب</th>
+                        <th className="p-4">القسم</th>
+                        <th className="p-4">المعرف (للدخول)</th>
+                        <th className="p-4 text-center">إدارة الحساب</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {teachers.map((t) => (
+                        <tr key={t.username} className="hover:bg-slate-50/50">
+                          <td className="p-4">
+                            {editingTeacherUsername === t.username ? (
+                              <div className="flex flex-col gap-2">
+                                <input type="text" value={editTeacherName} onChange={(e) => setEditTeacherName(e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded text-sm outline-none focus:border-emerald-500 font-bold" />
+                                <div className="flex gap-2">
+                                  <button type="button" onClick={() => handleEditTeacherSave(t.username)} className="bg-emerald-600 text-white text-[10px] px-2 py-1 rounded font-bold hover:bg-emerald-700">حفظ الاسم</button>
+                                  <button type="button" onClick={() => setEditingTeacherUsername(null)} className="bg-slate-200 text-slate-700 text-[10px] px-2 py-1 rounded font-bold hover:bg-slate-300">إلغاء</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="font-bold text-slate-900">{t.fullName}</span> 
+                                <div className="text-xs text-indigo-600 mt-1">{t.scientificTitle}</div>
+                              </>
+                            )}
+                          </td>
+                          <td className="p-4 font-medium text-slate-700">{t.department}</td>
+                          <td className="p-4 font-mono font-bold text-slate-800">{t.username}</td>
+                          <td className="p-4 text-center">
+                            {editingTeacherUsername !== t.username && (
+                              <div className="flex justify-center gap-1.5">
+                                <button type="button" onClick={() => { setEditingTeacherUsername(t.username); setEditTeacherName(t.fullName); }} className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-2 py-1.5 rounded text-[10px] font-bold border border-amber-100">تعديل الاسم فقط</button>
+                                <button type="button" onClick={() => setDeleteTeacherModal(t.username)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1.5 rounded text-[10px] font-bold border border-rose-100">حذف الحساب</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* Footer */}
+      <footer className="max-w-7xl mx-auto px-4 mt-16 text-center text-xs text-slate-500 border-t border-slate-200 pt-6">
+        <p className="font-bold">© 2026 شعبة ضمان الجودة وتقييم الأداء - المعهد التقني الدور - الجامعة التقنية الشمالية.</p>
+        <p className="mt-1">المنظومة مصممة لضمان حماية ومعيارية القيود البحثية للتدريسيين ودعم الترقيات العلمية.</p>
+      </footer>
+
+    </div>
+  );
+}
