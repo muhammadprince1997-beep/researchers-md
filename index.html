@@ -28,7 +28,7 @@
     <!-- مكتبة Babel لتحويل أكواد React تلقائياً في المتصفح -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- فرض خط تجوال بشكل كامل على المنظومة -->
+    <!-- فرض خط تجوال بشكل كامل على المنظومة وتثبيت المظهر الجمالي الملون -->
     <style>
         body, select, input, textarea, button, table, div, span, h1, h2, h3, p, a, label {
             font-family: 'Tajawal', sans-serif !important;
@@ -53,15 +53,17 @@
             getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // إعدادات ومفاتيح Firebase الرسمية والآمنة الخاصة بمشروعك
+        // =========================================================================
+        // 🔒 إعدادات مشروعك الجديد الفعّالة والآمنة (researchers-29475)
+        // =========================================================================
         const firebaseConfig = {
-            apiKey: "AIzaSyC4AnFr-41S5QU1GUirhNWO-pIQmV4lODY",
-            authDomain: "muhammed-forms.firebaseapp.com",
-            projectId: "muhammed-forms",
-            storageBucket: "muhammed-forms.firebasestorage.app",
-            messagingSenderId: "1061327268881",
-            appId: "1:1061327268881:web:a1b61dc28881bcdaaf55b0",
-            measurementId: "G-D6SDYJHJMM"
+            apiKey: "AIzaSyD_zC2oV7NzO7lSLtZXX0dy10Jgb4JPV_o",
+            authDomain: "researchers-29475.firebaseapp.com",
+            projectId: "researchers-29475",
+            storageBucket: "researchers-29475.firebasestorage.app",
+            messagingSenderId: "601438506195",
+            appId: "1:601438506195:web:56b2d0cf3e3535005a1826",
+            measurementId: "G-1BPRTVLTSP"
         };
 
         const app = initializeApp(firebaseConfig);
@@ -89,7 +91,7 @@
             "استاذ"
         ];
 
-        // احتساب العام الدراسي ديناميكياً بدلاً من التثبيت اليدوي
+        // احتساب العام الدراسي ديناميكياً بدلاً من التثبيت اليدوي لضمان الاستدامة التلقائية
         const currentSysDate = new Date();
         const currentSysYear = currentSysDate.getFullYear();
         const currentSysMonth = currentSysDate.getMonth() + 1; // 1-12
@@ -159,10 +161,10 @@
             // عرض الإشعارات السريعة
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
-                setTimeout(() => setToast(null), 4000);
+                setTimeout(() => setToast(null), 6000); // زيادة مدة التنبيه للقراءة المريحة
             };
 
-            // جلب الإعلان الفعّال من السحابة بسلام وأمان (دون تطلب تسجيل دخول مجهول لتجنب أخطاء الصلاحيات)
+            // جلب الإعلان الفعّال من السحابة بسلام وأمان
             const fetchAnnouncement = async () => {
                 try {
                     const docRef = doc(db, "settings", "announcement");
@@ -179,7 +181,7 @@
                 }
             };
 
-            // التحقق من وجود جلسة سابقة وجلب الإعلان مباشرة دون تطلب تسجيل دخول مجهول لتجنب الخطأ
+            // التحقق من وجود جلسة سابقة وجلب الإعلان مباشرة
             useEffect(() => {
                 fetchAnnouncement();
 
@@ -220,7 +222,31 @@
                 setLoading(false);
             };
 
-            // تسجيل الدخول المشفر والمؤمن بالكامل
+            // إكمال عملية الدخول وحفظ البيانات في الجلسة المحلية
+            const completeLogin = async (cleanUsername) => {
+                fetchAnnouncement();
+                if (cleanUsername === 'admin') {
+                    const adminUser = { fullName: "الأستاذ محمد عبدالرحمن", username: "admin", department: "شعبة ضمان الجودة" };
+                    setIsAdmin(true);
+                    setUser(adminUser);
+                    setActiveTab('dashboard');
+                    localStorage.setItem('quality_assurance_session', JSON.stringify({ user: adminUser, isAdmin: true }));
+                    await fetchCloudData(adminUser, true);
+                } else {
+                    const docRef = doc(db, "teachers", cleanUsername);
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        const teacherData = docSnap.data();
+                        setIsAdmin(false);
+                        setUser(teacherData);
+                        setActiveTab('dashboard');
+                        localStorage.setItem('quality_assurance_session', JSON.stringify({ user: teacherData, isAdmin: false }));
+                        await fetchCloudData(teacherData, false);
+                    }
+                }
+            };
+
+            // تسجيل الدخول الذكي والمؤمن بالكامل ضد أخطاء المزامنة السحابية وتنبيهات ميزة البريد وكلمة المرور
             const handleLogin = async (e) => {
                 e.preventDefault();
                 if (!loginUsername.trim() || !loginPassword.trim()) {
@@ -232,48 +258,66 @@
                 const secureEmail = `${cleanUsername}@aldour.iq`;
 
                 try {
-                    // التحقق من الهوية عبر سيرفرات جوجل المشفرة (لا توجد كلمات مرور مكشوفة في الكود نهائياً)
+                    // 1. محاولة تسجيل الدخول مباشرة باستخدام البريد السحابي
                     await signInWithEmailAndPassword(auth, secureEmail, loginPassword);
-
-                    // إعادة محاولة جلب الإعلان والتوجيه الرسمي فوراً بعد نجاح تسجيل الدخول لتحديثه سحابياً
-                    fetchAnnouncement();
-
-                    if (cleanUsername === 'admin') {
-                        const adminUser = { fullName: "الأستاذ محمد عبدالرحمن", username: "admin", department: "شعبة ضمان الجودة" };
-                        setIsAdmin(true);
-                        setUser(adminUser);
-                        setActiveTab('dashboard');
-                        localStorage.setItem('quality_assurance_session', JSON.stringify({ user: adminUser, isAdmin: true }));
-                        showToast("أهلاً بك أستاذ محمد. تم الدخول بوضع المدير العام.");
-                        await fetchCloudData(adminUser, true);
-                    } else {
-                        // جلب بيانات التدريسي من قاعدة البيانات بعد نجاح المصادقة
-                        const docRef = doc(db, "teachers", cleanUsername);
-                        const docSnap = await getDoc(docRef);
-
-                        if (docSnap.exists()) {
-                            const teacherData = docSnap.data();
-                            setIsAdmin(false);
-                            setUser(teacherData);
-                            setActiveTab('dashboard');
-                            localStorage.setItem('quality_assurance_session', JSON.stringify({ user: teacherData, isAdmin: false }));
-                            showToast(`أهلاً بك الأستاذ ${teacherData.fullName}. تم تسجيل دخولك بنجاح.`);
-                            await fetchCloudData(teacherData, false);
-                        } else {
-                            showToast("بيانات الحساب غير موجودة في السجلات!", "error");
-                            await signOut(auth);
-                        }
-                    }
+                    await completeLogin(cleanUsername);
                 } catch (error) {
-                    console.error("Login error:", error);
-                    if (cleanUsername === 'admin' && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
-                        try {
-                            await createUserWithEmailAndPassword(auth, secureEmail, loginPassword);
-                            showToast("تم تهيئة حساب المدير لأول مرة بنجاح، يرجى تسجيل الدخول مجدداً.");
-                        } catch (err) {
-                            showToast("الرمز السري يجب أن يكون 6 أرقام/أحرف على الأقل", "error");
+                    console.log("Direct sign-in failed, checking auto-registration fallback...", error.code);
+                    
+                    // تنبيه فوري وموجه في حال كانت ميزة البريد وكلمة المرور مغلقة في الفايربيس
+                    if (error.code === 'auth/operation-not-allowed') {
+                        showToast("تنبيه أمني: يرجى تفعيل ميزة (Email/Password) من لوحة تحكم Firebase (صفحة Authentication > Sign-in method) لتمكين الحسابات.", "error");
+                        setLoading(false);
+                        return;
+                    }
+                    
+                    try {
+                        if (cleanUsername === 'admin') {
+                            // حساب المدير: إذا لم يكن مهيئاً في المصادقة السحابية بعد، نقوم بإنشائه الآن
+                            try {
+                                await createUserWithEmailAndPassword(auth, secureEmail, loginPassword);
+                                showToast("تم تهيئة حساب المدير لأول مرة بنجاح! تم تسجيل دخولك.");
+                                await completeLogin(cleanUsername);
+                            } catch (createErr) {
+                                if (createErr.code === 'auth/operation-not-allowed') {
+                                    showToast("تنبيه أمني: يرجى تفعيل ميزة (Email/Password) من لوحة تحكم Firebase (صفحة Authentication > Sign-in method) لتمكين الحسابات.", "error");
+                                } else if (createErr.code === 'auth/email-already-in-use') {
+                                    showToast("رمز الدخول (كلمة المرور) الخاص بالمدير غير صحيح!", "error");
+                                } else {
+                                    showToast("خطأ في رمز المدير: " + createErr.message, "error");
+                                }
+                            }
+                        } else {
+                            // حسابات الأساتذة: نتحقق أولاً من قاعدة بيانات Firestore
+                            const docRef = doc(db, "teachers", cleanUsername);
+                            const docSnap = await getDoc(docRef);
+                            
+                            if (docSnap.exists()) {
+                                const teacherData = docSnap.data();
+                                // مطابقة كلمة المرور المدخلة مع كلمة المرور المخزنة في Firestore
+                                if (teacherData.password === loginPassword.trim()) {
+                                    // إذا تطابقت كلمة المرور ولم يكن الحساب مفعلاً في نظام المصادقة السحابي، نقوم بإنشائه فوراً وبشكل صامت
+                                    try {
+                                        await createUserWithEmailAndPassword(auth, secureEmail, loginPassword);
+                                        await completeLogin(cleanUsername);
+                                    } catch (createErr) {
+                                        if (createErr.code === 'auth/operation-not-allowed') {
+                                            showToast("تنبيه أمني: يرجى تفعيل ميزة (Email/Password) من لوحة تحكم Firebase (صفحة Authentication > Sign-in method) لتمكين الحسابات.", "error");
+                                        } else if (createErr.code === 'auth/email-already-in-use') {
+                                            showToast("رمز الدخول (كلمة المرور) غير صحيح!", "error");
+                                        } else {
+                                            showToast("خطأ في مزامنة الحساب: " + createErr.message, "error");
+                                        }
+                                    }
+                                } else {
+                                    showToast("رمز الدخول (كلمة المرور) غير صحيح!", "error");
+                                }
+                            } else {
+                                showToast("اسم المستخدم غير مسجل في المنظومة!", "error");
+                            }
                         }
-                    } else {
+                    } catch (dbErr) {
+                        console.error("Database check failed:", dbErr);
                         showToast("اسم المستخدم أو كلمة المرور غير صحيحة!", "error");
                     }
                 }
@@ -931,11 +975,11 @@
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                             <div>
                                                 <label className="block text-sm font-bold text-slate-600 mb-1.5">اسم المجلة/المؤتمر بالكامل *</label>
-                                                <input type="text" required value={formData.journalName} onChange={(e) => setFormData({...formData, journalName: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm"/>
+                                                <input type="text" required value={formData.journalName} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm" onChange={(e) => setFormData({...formData, journalName: e.target.value})}/>
                                             </div>
                                             <div>
                                                 <label className="block text-sm font-bold text-slate-600 mb-1.5">تصنيف المجلة (سكوباس، الخ) *</label>
-                                                <input type="text" required value={formData.journalType} onChange={(e) => setFormData({...formData, journalType: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm"/>
+                                                <input type="text" required value={formData.journalType} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm" onChange={(e) => setFormData({...formData, journalType: e.target.value})}/>
                                             </div>
                                         </div>
 
@@ -1120,7 +1164,9 @@
 
                     <footer className="max-w-7xl mx-auto px-4 mt-16 text-center text-xs text-slate-500 border-t border-slate-200 pt-6">
                         <p className="font-bold">© 2026 شعبة ضمان الجودة وتقييم الأداء - المعهد التقني الدور - الجامعة التقنية الشمالية.</p>
+                        <p className="mt-1">المنظومة مصممة لضمان حماية ومعيارية القيود البحثية للتدريسيين ودعم الترقيات العلمية.</p>
                     </footer>
+
                 </div>
             );
         }
