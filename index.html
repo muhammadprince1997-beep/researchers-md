@@ -70,7 +70,7 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // الأقسام المعتمدة في المعهد التقني الدور (مع إضافة الاطراف الصناعية)
+        // الأقسام المعتمدة في المعهد التقني الدور
         const DEPARTMENTS = [
             "المحاسبة",
             "الاسعاف الفوري",
@@ -116,19 +116,26 @@
             const [loginUsername, setLoginUsername] = useState('');
             const [loginPassword, setLoginPassword] = useState('');
 
-            // فلاتر البحث والفرز
+            // فلاتر البحث والفرز للبحوث العامة
             const [searchTerm, setSearchTerm] = useState('');
             const [filterDepartment, setFilterDepartment] = useState('الكل');
+
+            // فلتر البحث المخصص للتدريسيين في حسابات الأساتذة
+            const [teacherSearchTerm, setTeacherSearchTerm] = useState('');
             
             // نظام التنبيهات
             const [toast, setToast] = useState(null);
             const [deleteModalOpen, setDeleteModalOpen] = useState(null);
             const [deleteTeacherModal, setDeleteTeacherModal] = useState(null);
 
-            // حالات التعديل
+            // حالات التعديل للبحوث
             const [editingResearchId, setEditingResearchId] = useState(null);
+
+            // حالات التعديل للتدريسيين من قبل المدير
             const [editingTeacherUsername, setEditingTeacherUsername] = useState(null);
             const [editTeacherName, setEditTeacherName] = useState("");
+            const [editTeacherDept, setEditTeacherDept] = useState("");
+            const [editTeacherTitle, setEditTeacherTitle] = useState("");
 
             const [hasPublisher, setHasPublisher] = useState("كلا");
             const [hasCiteScore, setHasCiteScore] = useState("كلا");
@@ -168,7 +175,7 @@
                     }
                 } catch (error) {
                     console.warn("Announcement fallback:", error.message);
-                    setEditingAnnouncement(announcementText);
+                    setAnnouncementText(announcementText);
                 }
             };
 
@@ -394,18 +401,31 @@
                 showToast("تم استدعاء بيانات البحث للتعديل.");
             };
 
+            // تعديل وحفظ بيانات الأستاذ بالكامل من قبل المدير
             const handleEditTeacherSave = async (username) => {
                 if (!editTeacherName.trim()) return showToast("الاسم لا يمكن أن يكون فارغاً", "error");
                 setLoading(true);
                 try {
-                    await updateDoc(doc(db, "teachers", username), { fullName: editTeacherName.trim() });
+                    // تحديث بيانات الأستاذ في جدول الأساتذة بـ Firestore
+                    await updateDoc(doc(db, "teachers", username), { 
+                        fullName: editTeacherName.trim(),
+                        department: editTeacherDept,
+                        scientificTitle: editTeacherTitle
+                    });
+
+                    // تحديث كافة البحوث السابقة التي رفعها هذا الأستاذ لضمان مطابقة الاسم الجديد والقسم واللقب العلمي المحدث
                     const q = query(collection(db, "researches"), where("submittedBy", "==", username));
                     const querySnapshot = await getDocs(q);
                     const updatePromises = querySnapshot.docs.map(researchDoc => 
-                        updateDoc(doc(db, "researches", researchDoc.id), { authorName: editTeacherName.trim() })
+                        updateDoc(doc(db, "researches", researchDoc.id), { 
+                            authorName: editTeacherName.trim(),
+                            department: editTeacherDept,
+                            scientificTitle: editTeacherTitle
+                        })
                     );
                     await Promise.all(updatePromises);
-                    showToast("تم تحديث الاسم بنجاح.");
+
+                    showToast("تم تحديث بيانات التدريسي وتعديلها في كافة بحوثه السابقة بنجاح.");
                     setEditingTeacherUsername(null);
                     await fetchCloudData(user, true);
                 } catch (error) {
@@ -476,7 +496,7 @@
                     } else {
                         researchPayload.createdAt = new Date().toISOString();
                         await addDoc(collection(db, "researches"), researchPayload);
-                        showToast("تم حفظ بحثك بنجاح.");
+                        showToast("تم حفظ قيد البحث بنجاح.");
                     }
 
                     setFormData(initialFormState);
@@ -513,6 +533,16 @@
                     (item.journalName || '').toLowerCase().includes(searchStr);
                 const matchesDept = filterDepartment === 'الكل' || item.department === filterDepartment;
                 return matchesSearch && matchesDept;
+            });
+
+            // فلترة الحسابات المعتمدة للأساتذة بناءً على كلمة البحث الجديدة للمدير
+            const filteredTeachers = teachers.filter(t => {
+                const searchStr = teacherSearchTerm.toLowerCase();
+                return (
+                    (t.fullName || '').toLowerCase().includes(searchStr) ||
+                    (t.username || '').toLowerCase().includes(searchStr) ||
+                    (t.department || '').toLowerCase().includes(searchStr)
+                );
             });
 
             const exportToCSV = () => {
@@ -628,7 +658,7 @@
                             </div>
                         )}
 
-                        {/* واجهة الدخول المباشرة */}
+                        {/* واجهة الدخول المباشرة (بدون الشعار) */}
                         {activeTab === 'login' && !user && (
                             <div className="max-w-md mx-auto mt-12 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
                                 <div className="bg-slate-900 text-white text-center py-6 px-4 border-b border-slate-800">
@@ -738,7 +768,7 @@
                                 <form onSubmit={handleResearchSubmit} className="p-6 sm:p-8 space-y-6">
                                     <div className="space-y-5">
                                         <div>
-                                            <label className="block text-sm font-bold text-slate-600 mb-1.5">عنوان البحث *</label>
+                                            <label className="block text-sm font-bold text-slate-600 mb-1.5">عنوان البحث كما هو مذكور باللغة الإنكليزية أو اللغة العربية *</label>
                                             <textarea required rows="2" value={formData.researchTitle} onChange={(e) => setFormData({...formData, researchTitle: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-mono text-sm" />
                                         </div>
 
@@ -939,48 +969,92 @@
                                     </div>
 
                                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden md:col-span-2">
-                                        <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-sm text-slate-700">الحسابات ({teachers.length})</div>
+                                        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                            <div className="font-bold text-sm text-slate-700">الحسابات المصرح لها ({filteredTeachers.length})</div>
+                                            
+                                            {/* محرك البحث الجديد والمخصص للبحث عن تدريسي معين */}
+                                            <div className="w-full sm:w-64 relative">
+                                                <input 
+                                                    type="text" 
+                                                    value={teacherSearchTerm} 
+                                                    onChange={(e) => setTeacherSearchTerm(e.target.value)} 
+                                                    placeholder="البحث عن اسم أو معرّف تدريسي..." 
+                                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                />
+                                                <svg className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                                </svg>
+                                            </div>
+                                        </div>
+                                        
                                         <div className="overflow-x-auto text-sm">
                                             <table className="w-full text-right border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-100/40 border-b border-slate-200 font-bold text-slate-600">
-                                                        <th className="p-4">الاسم واللقب</th>
+                                                        <th className="p-4">الاسم واللقب العلمي</th>
                                                         <th className="p-4">القسم</th>
                                                         <th className="p-4">المعرف</th>
                                                         <th className="p-4 text-center">الإدارة</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
-                                                    {teachers.map((t) => (
-                                                        <tr key={t.username} className="hover:bg-slate-50/50">
-                                                            <td className="p-4">
-                                                                {editingTeacherUsername === t.username ? (
-                                                                    <div className="flex flex-col gap-2">
-                                                                        <input type="text" value={editTeacherName} onChange={(e) => setEditTeacherName(e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded text-sm font-bold" />
-                                                                        <div className="flex gap-2">
-                                                                            <button type="button" onClick={() => handleEditTeacherSave(t.username)} className="bg-emerald-600 text-white text-[10px] px-2 py-1 rounded font-bold">حفظ</button>
-                                                                            <button type="button" onClick={() => setEditingTeacherUsername(null)} className="bg-slate-200 text-slate-700 text-[10px] px-2 py-1 rounded font-bold">إلغاء</button>
+                                                    {filteredTeachers.length === 0 ? (
+                                                        <tr><td colSpan={4} className="p-8 text-center text-slate-400">لا توجد حسابات مطابقة للبحث.</td></tr>
+                                                    ) : (
+                                                        filteredTeachers.map((t) => (
+                                                            <tr key={t.username} className="hover:bg-slate-50/50">
+                                                                <td className="p-4">
+                                                                    {editingTeacherUsername === t.username ? (
+                                                                        <div className="flex flex-col gap-2 max-w-xs">
+                                                                            <label className="text-[10px] text-slate-400 font-bold">الاسم الثلاثي:</label>
+                                                                            <input type="text" value={editTeacherName} onChange={(e) => setEditTeacherName(e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                                                                            
+                                                                            <label className="text-[10px] text-slate-400 font-bold">اللقب العلمي الحالي:</label>
+                                                                            <select value={editTeacherTitle} onChange={(e) => setEditTeacherTitle(e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+                                                                                {SCIENTIFIC_TITLES.map(title => <option key={title} value={title}>{title}</option>)}
+                                                                            </select>
                                                                         </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <>
-                                                                        <span className="font-bold text-slate-900">{t.fullName}</span> 
-                                                                        <div className="text-xs text-indigo-600 mt-1">{t.scientificTitle}</div>
-                                                                    </>
-                                                                )}
-                                                            </td>
-                                                            <td className="p-4 font-medium text-slate-700">{t.department}</td>
-                                                            <td className="p-4 font-mono font-bold text-slate-800">{t.username}</td>
-                                                            <td className="p-4 text-center">
-                                                                {editingTeacherUsername !== t.username && (
-                                                                    <div className="flex justify-center gap-1.5">
-                                                                        <button type="button" onClick={() => { setEditingTeacherUsername(t.username); setEditTeacherName(t.fullName); }} className="bg-amber-50 text-amber-700 px-2 py-1.5 rounded text-[10px] font-bold">تعديل</button>
-                                                                        <button type="button" onClick={() => setDeleteTeacherModal(t.username)} className="bg-rose-50 text-rose-600 px-2 py-1.5 rounded text-[10px] font-bold">حذف</button>
-                                                                    </div>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                                    ) : (
+                                                                        <>
+                                                                            <span className="font-bold text-slate-900">{t.fullName}</span> 
+                                                                            <div className="text-xs text-indigo-600 mt-1 font-bold">{t.scientificTitle}</div>
+                                                                        </>
+                                                                    )}
+                                                                </td>
+                                                                <td className="p-4">
+                                                                    {editingTeacherUsername === t.username ? (
+                                                                        <div className="flex flex-col gap-2 max-w-xs">
+                                                                            <label className="text-[10px] text-slate-400 font-bold">القسم الأكاديمي:</label>
+                                                                            <select value={editTeacherDept} onChange={(e) => setEditTeacherDept(e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500">
+                                                                                {DEPARTMENTS.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                                                                            </select>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="font-medium text-slate-700">{t.department}</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="p-4 font-mono font-bold text-slate-800">{t.username}</td>
+                                                                <td className="p-4 text-center">
+                                                                    {editingTeacherUsername === t.username ? (
+                                                                        <div className="flex justify-center gap-1.5">
+                                                                            <button type="button" onClick={() => handleEditTeacherSave(t.username)} className="bg-emerald-600 text-white text-[10px] px-2.5 py-1.5 rounded font-bold shadow hover:bg-emerald-700 transition-colors">حفظ البيانات</button>
+                                                                            <button type="button" onClick={() => setEditingTeacherUsername(null)} className="bg-slate-200 text-slate-700 text-[10px] px-2.5 py-1.5 rounded font-bold hover:bg-slate-300 transition-colors">إلغاء</button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex justify-center gap-1.5">
+                                                                            <button type="button" onClick={() => { 
+                                                                                setEditingTeacherUsername(t.username); 
+                                                                                setEditTeacherName(t.fullName); 
+                                                                                setEditTeacherDept(t.department || DEPARTMENTS[0]); 
+                                                                                setEditTeacherTitle(t.scientificTitle || SCIENTIFIC_TITLES[0]);
+                                                                            }} className="bg-amber-50 hover:bg-amber-100 text-amber-700 px-2 py-1.5 rounded text-[10px] font-bold border border-amber-100 transition-colors">تعديل الحساب</button>
+                                                                            <button type="button" onClick={() => setDeleteTeacherModal(t.username)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1.5 rounded text-[10px] font-bold border border-rose-100 transition-colors">حذف</button>
+                                                                        </div>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))
+                                                    )}
                                                 </tbody>
                                             </table>
                                         </div>
